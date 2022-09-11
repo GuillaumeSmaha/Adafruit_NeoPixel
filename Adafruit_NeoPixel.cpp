@@ -45,6 +45,10 @@
 
 #include "Adafruit_NeoPixel.h"
 
+#elif defined(TARGET_STM32F1)
+#include "../../../../Marlin/src/HAL/shared/Delay.h"
+#endif
+
 #if defined(TARGET_LPC1768)
   #include <time.h>
 #endif
@@ -194,7 +198,7 @@ extern "C" void espShow(
   uint16_t pin, uint8_t *pixels, uint32_t numBytes, uint8_t type);
 #endif // ESP8266
 
-#if defined(K210) 
+#if defined(K210)
 #define KENDRYTE_K210 1
 #endif
 
@@ -1573,7 +1577,7 @@ void Adafruit_NeoPixel::show(void) {
   }// End of DMA implementation
   // ---------------------------------------------------------------------
   else{
-#ifndef ARDUINO_ARCH_NRF52840     
+#ifndef ARDUINO_ARCH_NRF52840
     // Fall back to DWT
     #if defined(ARDUINO_NRF52_ADAFRUIT)
       // Bluefruit Feather 52 uses freeRTOS
@@ -1972,6 +1976,57 @@ void Adafruit_NeoPixel::show(void) {
 #endif // NEO_KHZ400
   SysTick->LOAD = saveLoad;          // Restore SysTick rollover to 1 ms
   SysTick->VAL  = saveVal;           // Restore SysTick value
+#elif defined(STM32F1)
+#error You don't need this repository anymore. Marlin 2.1.x with Adafruit NeoPixel >= 1.8.x is now supporting STM32F1.
+#elif defined(TARGET_STM32F1)
+  volatile uint8_t  *ptr, *end, p, bitMask;
+  volatile uint32_t  pinMask;
+
+  pinMask =  BIT(PIN_MAP[pin].gpio_bit);
+  ptr     =  pixels;
+  end     =  ptr + numBytes;
+  p       = *ptr++;
+  bitMask =  0x80;
+
+  #define GPIO_SET(IO)   (PIN_MAP[IO].gpio_device->regs->BSRR = pinMask)
+  #define GPIO_CLEAR(IO) (PIN_MAP[IO].gpio_device->regs->BRR =  pinMask)
+
+#ifdef NEO_KHZ400 // 800 KHz check needed only if 400 KHz support enabled
+  if(is800KHz) {
+#endif
+    for(;;) {
+      if(p & bitMask) {
+        // data ONE high
+        // min: 650 typ: 800 max: 950
+        GPIO_SET(pin);
+        DELAY_NS(700);  //high
+        // min: 300 typ: 450 max: 600
+        GPIO_CLEAR(pin);
+        DELAY_NS(150);  //low
+      } else {
+        // data ZERO high
+        // min: 250  typ: 400 max: 550
+        GPIO_SET(pin);
+        DELAY_NS(100);  //high
+        // data low
+        // min: 700 typ: 850 max: 1000
+        GPIO_CLEAR(pin);
+        DELAY_NS(750);  //low
+      }
+      if(bitMask >>= 1) {
+        // Move on to the next pixel
+        asm("nop;");
+      } else {
+        if(ptr >= end) break;
+        p       = *ptr++;
+        bitMask = 0x80;
+      }
+    }
+#ifdef NEO_KHZ400
+  } else { // 400 KHz bitstream
+    // ToDo!
+  }
+#endif
 #elif defined (NRF51)
   uint8_t          *p   = pixels,
                     pix, count, mask;
@@ -2130,7 +2185,7 @@ void Adafruit_NeoPixel::show(void) {
 #elif defined(KENDRYTE_K210)
 
   k210Show(pin, pixels, numBytes, is800KHz);
-  
+
 #elif defined(__ARDUINO_ARC__)
 
 // Arduino 101  -----------------------------------------------------------
